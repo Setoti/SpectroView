@@ -822,9 +822,16 @@
     const height = canvas.height;
     const mid = height / 2;
     const samplesPerPixel = Math.max(1, Math.floor(float32Data.length / width));
+    // The canvas backing buffer is supersampled (devicePixelScale) well beyond CSS
+    // size, so a 1-device-pixel-wide line becomes a sub-CSS-pixel hairline once
+    // scaled down for display — quiet recordings (small min/max spread) then
+    // render as effectively invisible. Scale the stroke with the supersampling
+    // factor and enforce a minimum bar height so quiet audio stays visible.
+    const dpr = devicePixelScale();
+    const minBarHeight = dpr * 1.5;
 
     ctx.strokeStyle = cssVar('--wave') || '#4f9dff';
-    ctx.lineWidth = 1;
+    ctx.lineWidth = Math.max(1, dpr * 0.6);
     ctx.beginPath();
     for (let x = 0; x < width; x++) {
       const start = x * samplesPerPixel;
@@ -836,8 +843,13 @@
         if (v > max) max = v;
       }
       if (start >= end) { min = 0; max = 0; }
-      const yMin = mid - min * mid;
-      const yMax = mid - max * mid;
+      let yMin = mid - min * mid;
+      let yMax = mid - max * mid;
+      if (yMin - yMax < minBarHeight) {
+        const c = (yMin + yMax) / 2;
+        yMin = c + minBarHeight / 2;
+        yMax = c - minBarHeight / 2;
+      }
       ctx.moveTo(x + 0.5, yMax);
       ctx.lineTo(x + 0.5, yMin);
     }
