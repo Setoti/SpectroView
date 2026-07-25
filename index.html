@@ -1,0 +1,1373 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Recorder - ブラウザ録音ツール</title>
+<style>
+  :root {
+    --bg: #121317;
+    --panel: #191b20;
+    --panel-border: #2c3038;
+    --text: #dfe2e8;
+    --text-dim: #7d8390;
+    --accent: #2be6d0;
+    --track-wave: #ffb454;
+    --danger: #ff5252;
+    --wave: #ffb454;
+    --wave-live: #6be3a0;
+    --radius: 10px;
+    --mono: ui-monospace, "SF Mono", "Cascadia Mono", Consolas, "Roboto Mono", monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans", "Yu Gothic", sans-serif;
+  }
+  body {
+    min-height: 100vh;
+    display: flex;
+    justify-content: center;
+    padding: 32px 16px 56px;
+    background: radial-gradient(1000px 500px at 50% -10%, color-mix(in srgb, var(--accent) 5%, transparent), transparent 65%), var(--bg);
+    background-attachment: fixed;
+  }
+  main {
+    width: 100%;
+    max-width: 720px;
+  }
+  header {
+    text-align: center;
+    margin-bottom: 26px;
+  }
+  header h1 {
+    font-size: 1.4rem;
+    font-weight: 800;
+    margin: 0 0 6px;
+    letter-spacing: 0.06em;
+    color: var(--text);
+  }
+  header p {
+    margin: 0;
+    color: var(--text-dim);
+    font-size: 0.78rem;
+    letter-spacing: 0.02em;
+  }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    border-left: 3px solid var(--panel-border);
+    border-radius: var(--radius);
+    padding: 20px;
+    margin-bottom: 18px;
+    position: relative;
+    box-shadow: 0 16px 32px -20px rgba(0,0,0,0.7);
+  }
+  .panel.track-spec { border-left-color: var(--accent); }
+  .spec-row {
+    display: flex;
+    gap: 8px;
+    align-items: stretch;
+  }
+  .spec-row.stacked {
+    margin-top: 10px;
+  }
+  canvas#waveform {
+    flex: 1 1 auto;
+    min-width: 0;
+    width: 100%;
+    height: 180px;
+    display: block;
+    background: color-mix(in srgb, var(--panel) 92%, black 8%);
+    border-radius: 8px;
+  }
+  /* Reserves the same width as canvas#colorbar so the waveform's plotting area
+     is exactly as wide as the spectrogram's — otherwise the colorbar eats into
+     the spectrogram's width and the two panels' time axes drift out of sync. */
+  .colorbar-spacer {
+    flex: 0 0 46px;
+  }
+  canvas#spectrogram {
+    flex: 1 1 auto;
+    min-width: 0;
+    width: 100%;
+    height: 220px;
+    display: block;
+    background: #000;
+    border-radius: 8px;
+    cursor: crosshair;
+    touch-action: none;
+  }
+  canvas#colorbar {
+    flex: 0 0 46px;
+    width: 46px;
+    height: 220px;
+    display: block;
+    border-radius: 8px;
+  }
+  .section-title {
+    font-size: 0.78rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    display: flex;
+    align-items: center;
+    gap: 7px;
+  }
+  .section-title::before {
+    content: "";
+    width: 6px;
+    height: 6px;
+    background: var(--accent);
+    box-shadow: 0 0 6px color-mix(in srgb, var(--accent) 70%, transparent);
+    flex-shrink: 0;
+  }
+  .section-title-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 12px;
+  }
+  .range-label {
+    flex: 1;
+    font-family: var(--mono);
+    font-size: 0.76rem;
+    color: var(--accent);
+    font-variant-numeric: tabular-nums;
+  }
+  button.small {
+    flex: 0 0 auto;
+    min-width: 0;
+    padding: 6px 14px;
+    font-size: 0.72rem;
+    border-radius: 4px;
+  }
+  .hint {
+    font-size: 0.75rem;
+    color: var(--text-dim);
+    margin: 8px 0 0;
+  }
+  .meta-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 0.78rem;
+    color: var(--text-dim);
+    margin-top: 8px;
+  }
+  .timecode {
+    font-family: var(--mono);
+    font-size: 0.95rem;
+    letter-spacing: 0.04em;
+    color: var(--track-wave);
+    background: color-mix(in srgb, black 65%, var(--bg) 35%);
+    border: 1px solid var(--panel-border);
+    border-radius: 4px;
+    padding: 3px 9px;
+    text-shadow: 0 0 8px color-mix(in srgb, var(--track-wave) 45%, transparent);
+  }
+  .controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 14px;
+  }
+  button {
+    flex: 1 1 auto;
+    min-width: 96px;
+    padding: 10px 14px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    border-radius: 5px;
+    border: 1px solid var(--panel-border);
+    background: #101316;
+    color: var(--text);
+    cursor: pointer;
+    transition: background 0.15s ease, transform 0.08s ease, border-color 0.15s ease;
+  }
+  button:hover:not(:disabled) {
+    background: #171b1f;
+    border-color: color-mix(in srgb, var(--accent) 45%, var(--panel-border));
+  }
+  button:active:not(:disabled) { transform: scale(0.97); }
+  button:disabled { opacity: 0.35; cursor: not-allowed; }
+  .transport {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 16px;
+    padding: 8px 14px;
+    background: color-mix(in srgb, black 30%, var(--bg));
+    border: 1px solid var(--panel-border);
+    border-radius: 999px;
+    width: fit-content;
+  }
+  .transport-btn {
+    flex: 0 0 auto;
+    width: 46px;
+    height: 46px;
+    min-width: 0;
+    padding: 0;
+    border-radius: 50%;
+    font-size: 1.05rem;
+    line-height: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .transport-btn.rec {
+    background: radial-gradient(circle at 35% 30%, color-mix(in srgb, var(--danger) 85%, white 12%), color-mix(in srgb, var(--danger) 80%, black 10%) 70%);
+    border-color: color-mix(in srgb, var(--danger) 60%, black);
+    color: #fff;
+  }
+  .transport-btn.rec:hover:not(:disabled) {
+    box-shadow: 0 0 14px color-mix(in srgb, var(--danger) 55%, transparent);
+  }
+  .transport-btn.stop-icon {
+    background: color-mix(in srgb, var(--text) 10%, #000);
+    color: var(--text);
+  }
+  .transport-btn.play-icon {
+    background: color-mix(in srgb, var(--accent) 16%, #000);
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+  .transport-btn.play-icon:hover:not(:disabled) {
+    box-shadow: 0 0 14px color-mix(in srgb, var(--accent) 45%, transparent);
+  }
+  .transport-divider {
+    width: 1px;
+    height: 26px;
+    background: var(--panel-border);
+    margin: 0 2px;
+    flex: 0 0 auto;
+  }
+  .status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-family: var(--mono);
+    font-size: 0.8rem;
+    letter-spacing: 0.02em;
+    color: var(--text-dim);
+    margin-top: 14px;
+  }
+  .dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--text-dim);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--text-dim) 18%, transparent);
+    flex-shrink: 0;
+  }
+  .dot.recording {
+    background: var(--danger);
+    box-shadow: 0 0 0 0 rgba(255,82,82,0.5);
+    animation: pulse 1.2s infinite;
+  }
+  @keyframes pulse {
+    0% { box-shadow: 0 0 0 0 rgba(255,82,82,0.5); }
+    70% { box-shadow: 0 0 0 8px rgba(255,82,82,0); }
+    100% { box-shadow: 0 0 0 0 rgba(255,82,82,0); }
+  }
+  input[type=file] { display: none; }
+  .note {
+    font-size: 0.78rem;
+    color: var(--text-dim);
+    line-height: 1.6;
+    text-align: center;
+    margin-top: 4px;
+  }
+  .note strong { color: var(--text); }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Recorder</h1>
+    <p>ブラウザだけで録音・再生・波形表示ができるシンプルなツール</p>
+  </header>
+
+  <div class="panel track-spec">
+    <div class="section-title-row">
+      <div class="section-title">スペクトログラム</div>
+      <span class="range-label" id="specRangeLabel"></span>
+      <button id="saveImageBtn" class="small" disabled>画像で保存</button>
+      <button id="resetZoomBtn" class="small" disabled>全体表示</button>
+    </div>
+    <div class="spec-row">
+      <canvas id="spectrogram" width="1200" height="300"></canvas>
+      <canvas id="colorbar" width="46" height="300"></canvas>
+    </div>
+    <div class="spec-row stacked">
+      <canvas id="waveform" width="1200" height="360"></canvas>
+      <div class="colorbar-spacer"></div>
+    </div>
+    <p class="hint">色が黒→青→緑→黄→赤→白の順に変わるほど、その時刻・周波数の音が強いことを表します(右のカラーバーは収録内の最大音量を0dBとした目安)。ドラッグで範囲選択して拡大(横方向は時間、縦方向は周波数を拡大)、ホイールでズーム、ダブルクリックで全体表示に戻ります。時間を拡大すると、その範囲で自動的に再解析して解像度が上がります</p>
+    <div class="meta-row">
+      <span class="timecode" id="timeLabel">00:00.0</span>
+      <span id="fileLabel"></span>
+    </div>
+    <div class="status">
+      <span class="dot" id="statusDot"></span>
+      <span id="statusText">待機中</span>
+    </div>
+    <div class="transport">
+      <button id="recordBtn" class="transport-btn rec" title="録音">●</button>
+      <button id="stopBtn" class="transport-btn stop-icon" disabled title="停止">■</button>
+      <button id="playBtn" class="transport-btn play-icon" disabled title="再生">▶</button>
+      <div class="transport-divider"></div>
+      <button id="clearBtn" class="small" disabled>クリア</button>
+    </div>
+    <div class="controls">
+      <button id="loadBtn">ファイルを開く</button>
+      <button id="saveBtn" disabled>WAVで保存</button>
+      <input type="file" id="fileInput" accept="audio/*">
+    </div>
+  </div>
+
+  <p class="note">
+    <strong>プライバシー:</strong> マイクの音声・読み込んだ音声ファイルはすべてブラウザ内で処理されます。サーバーへの送信は一切行われません。
+  </p>
+</main>
+
+<script>
+(() => {
+  const recordBtn = document.getElementById('recordBtn');
+  const stopBtn = document.getElementById('stopBtn');
+  const playBtn = document.getElementById('playBtn');
+  const clearBtn = document.getElementById('clearBtn');
+  const loadBtn = document.getElementById('loadBtn');
+  const saveBtn = document.getElementById('saveBtn');
+  const saveImageBtn = document.getElementById('saveImageBtn');
+  const fileInput = document.getElementById('fileInput');
+  const canvas = document.getElementById('waveform');
+  const ctx = canvas.getContext('2d');
+  const specCanvas = document.getElementById('spectrogram');
+  const specCtx = specCanvas.getContext('2d');
+  const colorbarCanvas = document.getElementById('colorbar');
+  const colorbarCtx = colorbarCanvas.getContext('2d');
+  const resetZoomBtn = document.getElementById('resetZoomBtn');
+  const specRangeLabel = document.getElementById('specRangeLabel');
+  const statusDot = document.getElementById('statusDot');
+  const statusText = document.getElementById('statusText');
+  const timeLabel = document.getElementById('timeLabel');
+  const fileLabel = document.getElementById('fileLabel');
+
+  const cssVar = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+
+  // Render canvases at extra pixel density beyond the screen's own devicePixelRatio.
+  // The CSS size on screen doesn't change, but the pixel buffer does — so a
+  // right-click "save image as" captures far more real detail instead of just
+  // whatever the display's native pixel density happened to show.
+  const SUPERSAMPLE = 3;
+  const devicePixelScale = () => (window.devicePixelRatio || 1) * SUPERSAMPLE;
+
+  let audioCtx = null;
+  let mediaStream = null;
+  let sourceNode = null;
+  let analyser = null;
+  let processor = null;
+  let recordedChunks = [];
+  let sampleRate = 44100;
+  let recordedFloat32 = null;  // Float32Array, mono, full recording after stop
+  let isRecording = false;
+  let liveAnimId = null;
+
+  let playbackSource = null;
+  let isPlaying = false;
+
+  let specOffscreen = null; // bitmap currently displayed (either the overview or a sharper recompute for the zoomed range)
+  let specMeta = null;      // { numFrames, binCount, sr, rangeStart, rangeEnd } describing specOffscreen's time coverage
+  let overviewOffscreen = null; // the whole-recording bitmap computed once after stop/load; restored on zoom-out to full view
+  let overviewMeta = null;
+  let totalDuration = 0;    // seconds, the full recording length (fixed regardless of zoom)
+  let recomputeTimer = null; // debounce handle: re-run the FFT at higher resolution for the zoomed time range
+  let viewStart = 0;        // seconds, current visible time window
+  let viewEnd = 0;
+  let freqMin = 0;          // Hz, current visible frequency window into specOffscreen
+  let freqMax = 0;
+  let dragStartX = null;    // CSS-pixel coords, active drag-to-zoom selection
+  let dragCurrentX = null;
+  let dragStartY = null;
+  let dragCurrentY = null;
+  let isDragging = false;
+
+  // Magnitude colormap: black -> blue -> cyan -> green -> yellow -> red -> white.
+  // Ported from the reference lab tool's double2RGB() (tiff.cpp), a traditional
+  // bioacoustics spectrogram palette chosen to match that tool's look.
+  const SPEC_BG = '#000000';
+  const CM_RGBMAX = 0.75;
+  const CM_B0 = 0.00, CM_B1 = 0.15, CM_B2 = 0.20, CM_B3 = 0.30, CM_B4 = 0.55, CM_B5 = 0.60;
+  const CM_G0 = 0.15, CM_G1 = 0.25, CM_G2 = 0.40, CM_G3 = 0.55, CM_G4 = 0.60;
+  const CM_R0 = 0.30, CM_R1 = 0.45;
+
+  function magnitudeColor(t) {
+    const x = Math.max(0, Math.min(1, t)) * CM_RGBMAX;
+    let b;
+    if (x < CM_B1) b = 255 * Math.pow((x - CM_B0) / (CM_B1 - CM_B0), 1.5);
+    else if (x < CM_B2) b = 255;
+    else if (x < CM_B3) b = 255 * Math.pow((CM_B3 - x) / (CM_B3 - CM_B2), 0.7);
+    else if (x < CM_B4) b = 0;
+    else if (x < CM_B5) b = 255 * Math.pow((x - CM_B4) / (CM_B5 - CM_B4), 2.5);
+    else b = 255;
+
+    let g;
+    if (x < CM_G0) g = 0;
+    else if (x < CM_G1) g = 255 * Math.pow((x - CM_G0) / (CM_G1 - CM_G0), 0.7);
+    else if (x < CM_G2) g = 255;
+    else if (x < CM_G3) g = 255 * Math.pow((CM_G3 - x) / (CM_G3 - CM_G2), 0.8);
+    else if (x < CM_G4) g = 0;
+    else g = 255 * Math.pow((x - CM_G4) / (CM_RGBMAX - CM_G4), 0.7);
+
+    let r;
+    if (x < CM_R0) r = 0;
+    else if (x < CM_R1) r = 255 * Math.pow((x - CM_R0) / (CM_R1 - CM_R0), 0.6);
+    else r = 255;
+
+    return [Math.round(r), Math.round(g), Math.round(b)];
+  }
+
+  // Vertical legend for magnitudeColor(): top = loudest (0 dB, relative to the
+  // recording's own peak), bottom = -80 dB. Pure function of magnitudeColor,
+  // so it doesn't depend on whether a spectrogram has been computed yet.
+  function drawColorbar() {
+    const rect = colorbarCanvas.getBoundingClientRect();
+    const dpr = devicePixelScale();
+    const w = Math.max(1, Math.floor(rect.width * dpr));
+    const h = Math.max(1, Math.floor(rect.height * dpr));
+    colorbarCanvas.width = w;
+    colorbarCanvas.height = h;
+
+    const barLeft = 0;
+    const barWidth = Math.max(10, Math.floor(w * 0.42));
+    const gradient = colorbarCtx.createImageData(barWidth, h);
+    for (let y = 0; y < h; y++) {
+      const t = 1 - y / (h - 1); // top = 1 (loudest), bottom = 0 (quietest)
+      const [r, g, b] = magnitudeColor(t);
+      for (let x = 0; x < barWidth; x++) {
+        const idx = (y * barWidth + x) * 4;
+        gradient.data[idx] = r;
+        gradient.data[idx + 1] = g;
+        gradient.data[idx + 2] = b;
+        gradient.data[idx + 3] = 255;
+      }
+    }
+    colorbarCtx.clearRect(0, 0, w, h);
+    colorbarCtx.putImageData(gradient, barLeft, 0);
+    colorbarCtx.strokeStyle = 'rgba(255,255,255,0.3)';
+    colorbarCtx.lineWidth = 1;
+    colorbarCtx.strokeRect(barLeft + 0.5, 0.5, barWidth - 1, h - 1);
+
+    const ticks = [0, -20, -40, -60, -80];
+    colorbarCtx.fillStyle = cssVar('--text-dim') || '#8a90a2';
+    colorbarCtx.font = `${Math.max(10, w * 0.24)}px ui-monospace, Consolas, "Roboto Mono", monospace`;
+    colorbarCtx.textBaseline = 'middle';
+    ticks.forEach((db, i) => {
+      const frac = i / (ticks.length - 1);
+      const y = frac * h;
+      colorbarCtx.fillText(String(db), barLeft + barWidth + 3, Math.min(h - 4, Math.max(8, y)));
+    });
+  }
+  window.addEventListener('resize', drawColorbar);
+
+  function resizeCanvas() {
+    const rect = canvas.getBoundingClientRect();
+    const dpr = devicePixelScale();
+    canvas.width = Math.max(1, Math.floor(rect.width * dpr));
+    canvas.height = Math.max(1, Math.floor(rect.height * dpr));
+    drawWaveformView();
+  }
+  window.addEventListener('resize', resizeCanvas);
+
+  function resizeSpecCanvas() {
+    const rect = specCanvas.getBoundingClientRect();
+    const dpr = devicePixelScale();
+    specCanvas.width = Math.max(1, Math.floor(rect.width * dpr));
+    specCanvas.height = Math.max(1, Math.floor(rect.height * dpr));
+    if (specOffscreen && !isRecording) {
+      drawSpecView();
+    } else {
+      specCtx.fillStyle = SPEC_BG;
+      specCtx.fillRect(0, 0, specCanvas.width, specCanvas.height);
+      drawFreqAxis(0, (sampleRate || 44100) / 2);
+    }
+  }
+  window.addEventListener('resize', resizeSpecCanvas);
+
+  // Redraw the cached static spectrogram bitmap cropped to [viewStart, viewEnd] x [freqMin, freqMax].
+  // specOffscreen only covers [specMeta.rangeStart, specMeta.rangeEnd] (the whole recording for the
+  // overview bitmap, or a narrower higher-resolution recompute once the user has zoomed in on time).
+  function drawSpecView() {
+    if (!specOffscreen || !specMeta) return;
+    const totalCols = specOffscreen.width;
+    const totalRows = specOffscreen.height;
+    const nyquist = specMeta.sr / 2;
+    const bitmapSpan = Math.max(1e-9, specMeta.rangeEnd - specMeta.rangeStart);
+    const startCol = Math.max(0, Math.min(totalCols, ((viewStart - specMeta.rangeStart) / bitmapSpan) * totalCols));
+    const endCol = Math.max(0, Math.min(totalCols, ((viewEnd - specMeta.rangeStart) / bitmapSpan) * totalCols));
+    const colSpan = Math.max(1, endCol - startCol);
+    // Row 0 (top of the bitmap) is the highest frequency; row totalRows (bottom) is 0 Hz.
+    const topRow = Math.max(0, Math.min(totalRows, (1 - freqMax / nyquist) * totalRows));
+    const bottomRow = Math.max(0, Math.min(totalRows, (1 - freqMin / nyquist) * totalRows));
+    const rowSpan = Math.max(1, bottomRow - topRow);
+    specCtx.imageSmoothingEnabled = true;
+    specCtx.drawImage(specOffscreen, startCol, topRow, colSpan, rowSpan, 0, 0, specCanvas.width, specCanvas.height);
+    drawFreqAxis(freqMin, freqMax);
+    drawTimeAxis();
+    updateRangeLabel();
+  }
+
+  function freqLabel(freq) {
+    return freq >= 1000 ? (freq / 1000).toFixed(1) + 'kHz' : Math.round(freq) + 'Hz';
+  }
+
+  function drawFreqAxis(freqLo, freqHi) {
+    const ticks = 5;
+    const span = freqHi - freqLo;
+    specCtx.save();
+    specCtx.strokeStyle = 'rgba(255,255,255,0.15)';
+    specCtx.fillStyle = 'rgba(255,255,255,0.6)';
+    specCtx.font = `${Math.max(10, specCanvas.height * 0.035)}px ui-monospace, Consolas, "Roboto Mono", monospace`;
+    specCtx.lineWidth = 1;
+    for (let k = 0; k <= ticks; k++) {
+      const frac = k / ticks;
+      const y = specCanvas.height * (1 - frac);
+      specCtx.beginPath();
+      specCtx.moveTo(0, y);
+      specCtx.lineTo(specCanvas.width, y);
+      specCtx.stroke();
+      const freq = freqLo + frac * span;
+      const label = freq >= 1000 ? (freq / 1000).toFixed(1) + 'k' : Math.round(freq) + '';
+      specCtx.fillText(label, 4, Math.min(specCanvas.height - 3, Math.max(10, y - 2)));
+    }
+    specCtx.restore();
+  }
+
+  function drawTimeAxis() {
+    if (!specMeta) return;
+    const ticks = 5;
+    const span = viewEnd - viewStart;
+    specCtx.save();
+    specCtx.strokeStyle = 'rgba(255,255,255,0.12)';
+    specCtx.fillStyle = 'rgba(255,255,255,0.6)';
+    specCtx.font = `${Math.max(10, specCanvas.height * 0.035)}px ui-monospace, Consolas, "Roboto Mono", monospace`;
+    for (let k = 0; k <= ticks; k++) {
+      const frac = k / ticks;
+      const x = specCanvas.width * frac;
+      specCtx.beginPath();
+      specCtx.moveTo(x, 0);
+      specCtx.lineTo(x, specCanvas.height);
+      specCtx.stroke();
+      const label = formatTime(viewStart + frac * span);
+      const textWidth = specCtx.measureText(label).width;
+      const lx = Math.max(2, Math.min(specCanvas.width - textWidth - 2, x - textWidth / 2));
+      specCtx.fillText(label, lx, specCanvas.height - 4);
+    }
+    specCtx.restore();
+  }
+
+  function updateRangeLabel() {
+    if (!specMeta) { specRangeLabel.textContent = ''; return; }
+    const nyquist = specMeta.sr / 2;
+    const isFullTime = viewStart <= 1e-9 && viewEnd >= totalDuration - 1e-9;
+    const isFullFreq = freqMin <= 1e-9 && freqMax >= nyquist - 1e-9;
+    if (isFullTime && isFullFreq) {
+      specRangeLabel.textContent = '全体表示';
+      resetZoomBtn.disabled = true;
+      return;
+    }
+    const parts = [];
+    if (!isFullTime) parts.push(`${formatTime(viewStart)} 〜 ${formatTime(viewEnd)}`);
+    if (!isFullFreq) parts.push(`${freqLabel(freqMin)} 〜 ${freqLabel(freqMax)}`);
+    specRangeLabel.textContent = parts.join(' / ');
+    resetZoomBtn.disabled = false;
+  }
+
+  function resetZoom() {
+    if (!specMeta) return;
+    viewStart = 0;
+    viewEnd = totalDuration;
+    freqMin = 0;
+    freqMax = specMeta.sr / 2;
+    drawSpecView();
+    drawWaveformView();
+    scheduleTimeRangeRecompute();
+  }
+
+  function drawSelectionOverlay(xStartCss, xEndCss, yStartCss, yEndCss) {
+    const rect = specCanvas.getBoundingClientRect();
+    const scaleX = specCanvas.width / rect.width;
+    const scaleY = specCanvas.height / rect.height;
+    const x1 = Math.min(xStartCss, xEndCss) * scaleX;
+    const x2 = Math.max(xStartCss, xEndCss) * scaleX;
+    const y1 = Math.min(yStartCss, yEndCss) * scaleY;
+    const y2 = Math.max(yStartCss, yEndCss) * scaleY;
+    specCtx.save();
+    specCtx.fillStyle = 'rgba(79,157,255,0.25)';
+    specCtx.fillRect(x1, y1, x2 - x1, y2 - y1);
+    specCtx.strokeStyle = 'rgba(79,157,255,0.9)';
+    specCtx.lineWidth = 1;
+    specCtx.strokeRect(x1 + 0.5, y1 + 0.5, Math.max(0, x2 - x1 - 1), Math.max(0, y2 - y1 - 1));
+    specCtx.restore();
+  }
+
+  // Zooms the time axis, the frequency axis, or both — whichever the drag moved
+  // far enough on (a mostly-horizontal drag leaves the frequency view untouched
+  // and vice versa, so a plain left-right selection behaves like before).
+  function applyZoomFromCssRect(xMinCss, xMaxCss, yMinCss, yMaxCss, cssWidth, cssHeight) {
+    const minDragCss = 6;
+    let timeChanged = false;
+    if (xMaxCss - xMinCss >= minDragCss) {
+      const span = viewEnd - viewStart;
+      const newStart = viewStart + (xMinCss / cssWidth) * span;
+      const newEnd = viewStart + (xMaxCss / cssWidth) * span;
+      const bitmapSpan = specMeta.rangeEnd - specMeta.rangeStart;
+      const minSpan = bitmapSpan / Math.max(1, specMeta.numFrames) * 4;
+      if (newEnd - newStart >= minSpan) {
+        viewStart = Math.max(0, newStart);
+        viewEnd = Math.min(totalDuration, newEnd);
+        timeChanged = true;
+      }
+    }
+    if (yMaxCss - yMinCss >= minDragCss) {
+      const nyquist = specMeta.sr / 2;
+      const freqSpan = freqMax - freqMin;
+      // y=0 (top) is freqMax; y=cssHeight (bottom) is freqMin.
+      const newFreqHi = freqMax - (yMinCss / cssHeight) * freqSpan;
+      const newFreqLo = freqMax - (yMaxCss / cssHeight) * freqSpan;
+      const minSpanF = nyquist / Math.max(1, specMeta.binCount) * 4;
+      if (newFreqHi - newFreqLo >= minSpanF) {
+        freqMin = Math.max(0, newFreqLo);
+        freqMax = Math.min(nyquist, newFreqHi);
+      }
+    }
+    drawSpecView();
+    if (timeChanged) {
+      drawWaveformView();
+      scheduleTimeRangeRecompute();
+    }
+  }
+
+  specCanvas.addEventListener('pointerdown', (e) => {
+    if (!specOffscreen || isRecording) return;
+    isDragging = true;
+    const rect = specCanvas.getBoundingClientRect();
+    dragStartX = dragCurrentX = e.clientX - rect.left;
+    dragStartY = dragCurrentY = e.clientY - rect.top;
+    specCanvas.setPointerCapture(e.pointerId);
+  });
+
+  specCanvas.addEventListener('pointermove', (e) => {
+    if (!isDragging) return;
+    const rect = specCanvas.getBoundingClientRect();
+    dragCurrentX = e.clientX - rect.left;
+    dragCurrentY = e.clientY - rect.top;
+    drawSpecView();
+    drawSelectionOverlay(dragStartX, dragCurrentX, dragStartY, dragCurrentY);
+  });
+
+  function endDrag(e) {
+    if (!isDragging) return;
+    isDragging = false;
+    const rect = specCanvas.getBoundingClientRect();
+    const endX = e.clientX - rect.left;
+    const endY = e.clientY - rect.top;
+    applyZoomFromCssRect(
+      Math.min(dragStartX, endX), Math.max(dragStartX, endX),
+      Math.min(dragStartY, endY), Math.max(dragStartY, endY),
+      rect.width, rect.height
+    );
+    dragStartX = dragCurrentX = dragStartY = dragCurrentY = null;
+  }
+  specCanvas.addEventListener('pointerup', endDrag);
+  specCanvas.addEventListener('pointercancel', () => {
+    isDragging = false;
+    dragStartX = dragCurrentX = dragStartY = dragCurrentY = null;
+    drawSpecView();
+  });
+
+  specCanvas.addEventListener('dblclick', resetZoom);
+  resetZoomBtn.addEventListener('click', resetZoom);
+
+  specCanvas.addEventListener('wheel', (e) => {
+    if (!specOffscreen || isRecording || !specMeta) return;
+    e.preventDefault();
+    const rect = specCanvas.getBoundingClientRect();
+    const xFrac = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    const yFrac = Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height));
+    const zoomFactor = e.deltaY < 0 ? 0.8 : 1.25;
+
+    const spanT = viewEnd - viewStart;
+    const centerTime = viewStart + xFrac * spanT;
+    const bitmapSpan = specMeta.rangeEnd - specMeta.rangeStart;
+    const minSpanT = bitmapSpan / Math.max(1, specMeta.numFrames) * 4;
+    let newSpanT = Math.max(minSpanT, Math.min(totalDuration, spanT * zoomFactor));
+    let newStart = centerTime - xFrac * newSpanT;
+    let newEnd = newStart + newSpanT;
+    if (newStart < 0) { newEnd -= newStart; newStart = 0; }
+    if (newEnd > totalDuration) { newStart -= (newEnd - totalDuration); newEnd = totalDuration; }
+    viewStart = Math.max(0, newStart);
+    viewEnd = Math.min(totalDuration, newEnd);
+
+    const nyquist = specMeta.sr / 2;
+    const spanF = freqMax - freqMin;
+    const centerFreq = freqMax - yFrac * spanF; // y=0 (top) is the high-frequency edge
+    const minSpanF = nyquist / Math.max(1, specMeta.binCount) * 4;
+    let newSpanF = Math.max(minSpanF, Math.min(nyquist, spanF * zoomFactor));
+    let newFreqHi = centerFreq + yFrac * newSpanF;
+    let newFreqLo = newFreqHi - newSpanF;
+    if (newFreqLo < 0) { newFreqHi -= newFreqLo; newFreqLo = 0; }
+    if (newFreqHi > nyquist) { newFreqLo -= (newFreqHi - nyquist); newFreqHi = nyquist; }
+    freqMin = Math.max(0, newFreqLo);
+    freqMax = Math.min(nyquist, newFreqHi);
+
+    drawSpecView();
+    drawWaveformView();
+    scheduleTimeRangeRecompute();
+  }, { passive: false });
+
+  function clearCanvas() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    drawCenterLine();
+  }
+
+  function drawCenterLine() {
+    ctx.strokeStyle = 'rgba(128,128,128,0.25)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(0, canvas.height / 2);
+    ctx.lineTo(canvas.width, canvas.height / 2);
+    ctx.stroke();
+  }
+
+  function setStatus(text, recording) {
+    statusText.textContent = text;
+    statusDot.classList.toggle('recording', !!recording);
+  }
+
+  function formatTime(sec) {
+    const m = Math.floor(sec / 60);
+    const s = (sec % 60).toFixed(1).padStart(4, '0');
+    return `${String(m).padStart(2, '0')}:${s}`;
+  }
+
+  // ---- Live waveform (oscilloscope style) during recording ----
+  function drawLiveFrame() {
+    if (!analyser) return;
+    const bufferLength = analyser.fftSize;
+    const dataArray = new Uint8Array(bufferLength);
+    analyser.getByteTimeDomainData(dataArray);
+
+    clearCanvas();
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = cssVar('--wave-live') || '#6be3a0';
+    ctx.beginPath();
+    const sliceWidth = canvas.width / bufferLength;
+    let x = 0;
+    for (let i = 0; i < bufferLength; i++) {
+      const v = dataArray[i] / 128.0;
+      const y = (v * canvas.height) / 2;
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+      x += sliceWidth;
+    }
+    ctx.stroke();
+
+    drawLiveSpectrogramColumn();
+
+    liveAnimId = requestAnimationFrame(drawLiveFrame);
+  }
+
+  // ---- Live spectrogram: scroll left, paint one new column of frequency data ----
+  function drawLiveSpectrogramColumn() {
+    const freqData = new Uint8Array(analyser.frequencyBinCount);
+    analyser.getByteFrequencyData(freqData);
+
+    const binCount = freqData.length;
+    const col = document.createElement('canvas');
+    col.width = 1;
+    col.height = binCount;
+    const colCtx = col.getContext('2d');
+    const imgData = colCtx.createImageData(1, binCount);
+    for (let i = 0; i < binCount; i++) {
+      const [r, g, b] = magnitudeColor(freqData[i] / 255);
+      const row = binCount - 1 - i; // low frequency at the bottom
+      const idx = row * 4;
+      imgData.data[idx] = r;
+      imgData.data[idx + 1] = g;
+      imgData.data[idx + 2] = b;
+      imgData.data[idx + 3] = 255;
+    }
+    colCtx.putImageData(imgData, 0, 0);
+
+    const shiftPx = Math.max(1, Math.round(specCanvas.width / 600));
+    specCtx.drawImage(
+      specCanvas, shiftPx, 0, specCanvas.width - shiftPx, specCanvas.height,
+      0, 0, specCanvas.width - shiftPx, specCanvas.height
+    );
+    specCtx.drawImage(col, 0, 0, 1, binCount, specCanvas.width - shiftPx, 0, shiftPx, specCanvas.height);
+    drawFreqAxis(0, analyser.context.sampleRate / 2);
+  }
+
+  // ---- Static waveform (min/max envelope) for a full buffer ----
+  function drawStaticWaveform(float32Data) {
+    clearCanvas();
+    const width = canvas.width;
+    const height = canvas.height;
+    const mid = height / 2;
+    const samplesPerPixel = Math.max(1, Math.floor(float32Data.length / width));
+
+    ctx.strokeStyle = cssVar('--wave') || '#4f9dff';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (let x = 0; x < width; x++) {
+      const start = x * samplesPerPixel;
+      const end = Math.min(float32Data.length, start + samplesPerPixel);
+      let min = 1, max = -1;
+      for (let i = start; i < end; i++) {
+        const v = float32Data[i];
+        if (v < min) min = v;
+        if (v > max) max = v;
+      }
+      if (start >= end) { min = 0; max = 0; }
+      const yMin = mid - min * mid;
+      const yMax = mid - max * mid;
+      ctx.moveTo(x + 0.5, yMax);
+      ctx.lineTo(x + 0.5, yMin);
+    }
+    ctx.stroke();
+  }
+
+  // Redraws the waveform cropped to [viewStart, viewEnd] — the same time window the
+  // spectrogram is showing — plus a matching time axis, so the two panels line up.
+  function drawWaveformView() {
+    if (recordedFloat32 && !isRecording && totalDuration > 0) {
+      const start = Math.max(0, Math.min(recordedFloat32.length, Math.round(viewStart * sampleRate)));
+      const end = Math.max(start + 1, Math.min(recordedFloat32.length, Math.round(viewEnd * sampleRate)));
+      drawStaticWaveform(recordedFloat32.subarray(start, end));
+      drawWaveformTimeAxis();
+    } else {
+      clearCanvas();
+    }
+  }
+
+  function drawWaveformTimeAxis() {
+    const ticks = 5;
+    const span = viewEnd - viewStart;
+    ctx.save();
+    ctx.strokeStyle = 'rgba(128,128,128,0.15)';
+    ctx.fillStyle = cssVar('--text-dim') || '#8a90a2';
+    ctx.font = `${Math.max(10, canvas.height * 0.035)}px ui-monospace, Consolas, "Roboto Mono", monospace`;
+    for (let k = 0; k <= ticks; k++) {
+      const frac = k / ticks;
+      const x = canvas.width * frac;
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, canvas.height);
+      ctx.stroke();
+      const label = formatTime(viewStart + frac * span);
+      const textWidth = ctx.measureText(label).width;
+      const lx = Math.max(2, Math.min(canvas.width - textWidth - 2, x - textWidth / 2));
+      ctx.fillText(label, lx, canvas.height - 4);
+    }
+    ctx.restore();
+  }
+
+  // ---- Static spectrogram: offline STFT over a full buffer ----
+  function hannWindow(n) {
+    const w = new Float32Array(n);
+    for (let i = 0; i < n; i++) w[i] = 0.5 - 0.5 * Math.cos((2 * Math.PI * i) / (n - 1));
+    return w;
+  }
+
+  // In-place iterative radix-2 Cooley-Tukey FFT. real/imag length must be a power of two.
+  function fft(real, imag) {
+    const n = real.length;
+    for (let i = 1, j = 0; i < n; i++) {
+      let bit = n >> 1;
+      for (; j & bit; bit >>= 1) j ^= bit;
+      j ^= bit;
+      if (i < j) {
+        [real[i], real[j]] = [real[j], real[i]];
+        [imag[i], imag[j]] = [imag[j], imag[i]];
+      }
+    }
+    for (let len = 2; len <= n; len <<= 1) {
+      const ang = (-2 * Math.PI) / len;
+      const wr = Math.cos(ang), wi = Math.sin(ang);
+      for (let i = 0; i < n; i += len) {
+        let curWr = 1, curWi = 0;
+        for (let j = 0; j < len / 2; j++) {
+          const ur = real[i + j], ui = imag[i + j];
+          const vr = real[i + j + len / 2] * curWr - imag[i + j + len / 2] * curWi;
+          const vi = real[i + j + len / 2] * curWi + imag[i + j + len / 2] * curWr;
+          real[i + j] = ur + vr; imag[i + j] = ui + vi;
+          real[i + j + len / 2] = ur - vr; imag[i + j + len / 2] = ui - vi;
+          const nwr = curWr * wr - curWi * wi;
+          const nwi = curWr * wi + curWi * wr;
+          curWr = nwr; curWi = nwi;
+        }
+      }
+    }
+  }
+
+  function computeSpectrogram(float32Data, sr) {
+    const frameSize = 2048; // higher frameSize = finer frequency bins, at the cost of time resolution per window
+    const binCount = frameSize / 2;
+    let hop = frameSize / 4;
+    const maxColumns = 4500; // higher cap = finer time resolution once a range is zoomed/recomputed
+    const estFrames = Math.max(1, Math.floor((float32Data.length - frameSize) / hop) + 1);
+    if (estFrames > maxColumns) {
+      hop = Math.max(frameSize / 8, Math.ceil((float32Data.length - frameSize) / maxColumns));
+    }
+    const numFrames = Math.max(1, Math.floor(Math.max(0, float32Data.length - frameSize) / hop) + 1);
+    const window = hannWindow(frameSize);
+    const real = new Float32Array(frameSize);
+    const imag = new Float32Array(frameSize);
+    const dbFrames = new Float32Array(numFrames * binCount);
+    let maxDb = -Infinity;
+
+    for (let f = 0; f < numFrames; f++) {
+      const start = f * hop;
+      for (let i = 0; i < frameSize; i++) {
+        const s = start + i < float32Data.length ? float32Data[start + i] : 0;
+        real[i] = s * window[i];
+        imag[i] = 0;
+      }
+      fft(real, imag);
+      for (let b = 0; b < binCount; b++) {
+        const mag = Math.sqrt(real[b] * real[b] + imag[b] * imag[b]) / frameSize;
+        const db = 20 * Math.log10(mag + 1e-12);
+        dbFrames[f * binCount + b] = db;
+        if (db > maxDb) maxDb = db;
+      }
+    }
+    return { dbFrames, numFrames, binCount, maxDb };
+  }
+
+  function renderSpectrogramBitmap(spec) {
+    const { dbFrames, numFrames, binCount, maxDb } = spec;
+    const floorDb = maxDb - 80; // 80 dB dynamic range
+    const range = Math.max(1e-6, maxDb - floorDb);
+    const off = document.createElement('canvas');
+    off.width = numFrames;
+    off.height = binCount;
+    const offCtx = off.getContext('2d');
+    const imgData = offCtx.createImageData(numFrames, binCount);
+    for (let f = 0; f < numFrames; f++) {
+      for (let b = 0; b < binCount; b++) {
+        const db = dbFrames[f * binCount + b];
+        const t = Math.max(0, Math.min(1, (db - floorDb) / range));
+        const [r, g, bl] = magnitudeColor(t);
+        const row = binCount - 1 - b; // low frequency at the bottom
+        const idx = (row * numFrames + f) * 4;
+        imgData.data[idx] = r;
+        imgData.data[idx + 1] = g;
+        imgData.data[idx + 2] = bl;
+        imgData.data[idx + 3] = 255;
+      }
+    }
+    offCtx.putImageData(imgData, 0, 0);
+    return off;
+  }
+
+  // totalDuration / viewStart / viewEnd / freqMin / freqMax are set synchronously by the
+  // caller (stopRecording / loadFile) before this runs, so a zoom the user makes during
+  // this async gap isn't clobbered once the overview bitmap lands.
+  function scheduleSpectrogramCompute(float32Data, sr, doneText) {
+    if (recomputeTimer) { clearTimeout(recomputeTimer); recomputeTimer = null; }
+    setTimeout(() => {
+      const spec = computeSpectrogram(float32Data, sr);
+      const duration = float32Data.length / sr;
+      overviewOffscreen = renderSpectrogramBitmap(spec);
+      overviewMeta = { numFrames: spec.numFrames, binCount: spec.binCount, sr, rangeStart: 0, rangeEnd: duration };
+      specOffscreen = overviewOffscreen;
+      specMeta = overviewMeta;
+      resizeSpecCanvas();
+      setStatus(doneText, false);
+    }, 0);
+  }
+
+  // Debounced: after the user settles on a zoomed time range, re-run the FFT using only the
+  // samples in that range so the same frame budget (computeSpectrogram's maxColumns) buys much
+  // finer time resolution than stretching a crop of the whole-recording overview would. Zooming
+  // back out to the full view restores the cached overview instantly instead of recomputing.
+  function scheduleTimeRangeRecompute() {
+    if (recomputeTimer) clearTimeout(recomputeTimer);
+    recomputeTimer = setTimeout(() => {
+      recomputeTimer = null;
+      refreshSpecForCurrentView();
+    }, 250);
+  }
+
+  function refreshSpecForCurrentView() {
+    if (!recordedFloat32 || isRecording || !overviewMeta) return;
+    const isFullTime = viewStart <= 1e-9 && viewEnd >= totalDuration - 1e-9;
+    if (isFullTime) {
+      if (specOffscreen !== overviewOffscreen) {
+        specOffscreen = overviewOffscreen;
+        specMeta = overviewMeta;
+        drawSpecView();
+      }
+      return;
+    }
+    const nStart = Math.max(0, Math.min(recordedFloat32.length, Math.round(viewStart * sampleRate)));
+    const nEnd = Math.max(nStart + 1, Math.min(recordedFloat32.length, Math.round(viewEnd * sampleRate)));
+    const spec = computeSpectrogram(recordedFloat32.subarray(nStart, nEnd), sampleRate);
+    specOffscreen = renderSpectrogramBitmap(spec);
+    specMeta = {
+      numFrames: spec.numFrames,
+      binCount: spec.binCount,
+      sr: sampleRate,
+      rangeStart: nStart / sampleRate,
+      rangeEnd: nEnd / sampleRate,
+    };
+    drawSpecView();
+  }
+
+  // ---- Recording ----
+  async function startRecording() {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      alert('このブラウザ/接続ではマイクを利用できません。HTTPSまたはlocalhostで開いてください。');
+      return;
+    }
+    try {
+      mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch (err) {
+      alert('マイクにアクセスできませんでした: ' + err.message);
+      return;
+    }
+
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    sampleRate = audioCtx.sampleRate;
+    sourceNode = audioCtx.createMediaStreamSource(mediaStream);
+
+    analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 2048;
+    analyser.minDecibels = -90;
+    analyser.maxDecibels = -10;
+    analyser.smoothingTimeConstant = 0.4;
+    sourceNode.connect(analyser);
+
+    const bufferSize = 4096;
+    processor = audioCtx.createScriptProcessor(bufferSize, 1, 1);
+    recordedChunks = [];
+    processor.onaudioprocess = (e) => {
+      const input = e.inputBuffer.getChannelData(0);
+      recordedChunks.push(new Float32Array(input));
+    };
+    sourceNode.connect(processor);
+    // ScriptProcessor only fires onaudioprocess while connected to a destination;
+    // route through a silent gain node so recorded audio isn't echoed back live.
+    const silentGain = audioCtx.createGain();
+    silentGain.gain.value = 0;
+    processor.connect(silentGain);
+    silentGain.connect(audioCtx.destination);
+
+    isRecording = true;
+    recordedFloat32 = null;
+    if (recomputeTimer) { clearTimeout(recomputeTimer); recomputeTimer = null; }
+    specOffscreen = null;
+    specMeta = null;
+    overviewOffscreen = null;
+    overviewMeta = null;
+    totalDuration = 0;
+    viewStart = 0;
+    viewEnd = 0;
+    freqMin = 0;
+    freqMax = 0;
+    resizeSpecCanvas();
+    setStatus('録音中…', true);
+    recordBtn.disabled = true;
+    stopBtn.disabled = false;
+    playBtn.disabled = true;
+    saveBtn.disabled = true;
+    saveImageBtn.disabled = true;
+    clearBtn.disabled = true;
+    fileLabel.textContent = '';
+
+    startTimer();
+    drawLiveFrame();
+  }
+
+  function stopRecording() {
+    if (!isRecording) return;
+    isRecording = false;
+    cancelAnimationFrame(liveAnimId);
+    stopTimer();
+
+    if (processor) { processor.disconnect(); processor.onaudioprocess = null; }
+    if (sourceNode) sourceNode.disconnect();
+    if (mediaStream) mediaStream.getTracks().forEach(t => t.stop());
+    if (audioCtx) audioCtx.close();
+
+    const totalLength = recordedChunks.reduce((sum, c) => sum + c.length, 0);
+    const merged = new Float32Array(totalLength);
+    let offset = 0;
+    for (const chunk of recordedChunks) {
+      merged.set(chunk, offset);
+      offset += chunk.length;
+    }
+    recordedFloat32 = merged;
+    recordedChunks = [];
+    totalDuration = merged.length / sampleRate;
+    viewStart = 0;
+    viewEnd = totalDuration;
+    freqMin = 0;
+    freqMax = sampleRate / 2;
+
+    resizeCanvas();
+
+    recordBtn.disabled = false;
+    stopBtn.disabled = true;
+    playBtn.disabled = merged.length === 0;
+    saveBtn.disabled = merged.length === 0;
+    saveImageBtn.disabled = merged.length === 0;
+    clearBtn.disabled = merged.length === 0;
+
+    updateTimeLabel(merged.length / sampleRate);
+
+    if (merged.length > 0) {
+      setStatus('録音完了・スペクトログラム解析中…', false);
+      scheduleSpectrogramCompute(merged, sampleRate, '録音完了');
+    } else {
+      setStatus('録音完了', false);
+    }
+  }
+
+  // ---- Timer ----
+  let timerStart = 0;
+  let timerId = null;
+  function startTimer() {
+    timerStart = performance.now();
+    timerId = setInterval(() => {
+      updateTimeLabel((performance.now() - timerStart) / 1000);
+    }, 100);
+  }
+  function stopTimer() {
+    clearInterval(timerId);
+  }
+  function updateTimeLabel(sec) {
+    timeLabel.textContent = formatTime(sec);
+  }
+
+  // ---- Playback ----
+  function play() {
+    if (!recordedFloat32 || isPlaying) return;
+    if (!audioCtx || audioCtx.state === 'closed') {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    const buffer = audioCtx.createBuffer(1, recordedFloat32.length, sampleRate);
+    buffer.copyToChannel(recordedFloat32, 0);
+
+    playbackSource = audioCtx.createBufferSource();
+    playbackSource.buffer = buffer;
+    playbackSource.connect(audioCtx.destination);
+    playbackSource.onended = () => {
+      isPlaying = false;
+      playBtn.textContent = '▶';
+      playBtn.title = '再生';
+    };
+    playbackSource.start();
+    isPlaying = true;
+    playBtn.textContent = '■';
+    playBtn.title = '停止';
+  }
+
+  function stopPlayback() {
+    if (playbackSource) {
+      try { playbackSource.stop(); } catch (e) {}
+      playbackSource = null;
+    }
+    isPlaying = false;
+    playBtn.textContent = '▶';
+    playBtn.title = '再生';
+  }
+
+  playBtn.addEventListener('click', () => {
+    if (isPlaying) stopPlayback();
+    else play();
+  });
+
+  // ---- Clear ----
+  function clearAll() {
+    stopPlayback();
+    recordedFloat32 = null;
+    recordedChunks = [];
+    if (recomputeTimer) { clearTimeout(recomputeTimer); recomputeTimer = null; }
+    specOffscreen = null;
+    specMeta = null;
+    overviewOffscreen = null;
+    overviewMeta = null;
+    totalDuration = 0;
+    viewStart = 0;
+    viewEnd = 0;
+    freqMin = 0;
+    freqMax = 0;
+    clearCanvas();
+    resizeSpecCanvas();
+    specRangeLabel.textContent = '';
+    resetZoomBtn.disabled = true;
+    setStatus('待機中', false);
+    timeLabel.textContent = '00:00.0';
+    fileLabel.textContent = '';
+    playBtn.disabled = true;
+    saveBtn.disabled = true;
+    saveImageBtn.disabled = true;
+    clearBtn.disabled = true;
+  }
+
+  // ---- WAV encoding ----
+  function encodeWav(float32Data, sampleRate) {
+    const numChannels = 1;
+    const bytesPerSample = 2;
+    const blockAlign = numChannels * bytesPerSample;
+    const dataSize = float32Data.length * bytesPerSample;
+    const buffer = new ArrayBuffer(44 + dataSize);
+    const view = new DataView(buffer);
+
+    function writeString(offset, str) {
+      for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i));
+    }
+
+    writeString(0, 'RIFF');
+    view.setUint32(4, 36 + dataSize, true);
+    writeString(8, 'WAVE');
+    writeString(12, 'fmt ');
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true); // PCM
+    view.setUint16(22, numChannels, true);
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, sampleRate * blockAlign, true);
+    view.setUint16(32, blockAlign, true);
+    view.setUint16(34, bytesPerSample * 8, true);
+    writeString(36, 'data');
+    view.setUint32(40, dataSize, true);
+
+    let offset = 44;
+    for (let i = 0; i < float32Data.length; i++) {
+      const s = Math.max(-1, Math.min(1, float32Data[i]));
+      view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+      offset += 2;
+    }
+    return new Blob([buffer], { type: 'audio/wav' });
+  }
+
+  function saveWav() {
+    if (!recordedFloat32) return;
+    const blob = encodeWav(recordedFloat32, sampleRate);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const ts = new Date().toISOString().replace(/[:.]/g, '-');
+    a.href = url;
+    a.download = `recording-${ts}.wav`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  // Composites the spectrogram (with its colorbar) and the waveform into a single
+  // PNG, stacked the same way they appear on screen, at each canvas's own full
+  // (supersampled) pixel resolution — so this is one image, not two separate saves.
+  function saveCombinedImage() {
+    if (!recordedFloat32) return;
+    const gapX = Math.round(8 * devicePixelScale());
+    const gapY = Math.round(16 * devicePixelScale());
+    const specRowWidth = specCanvas.width + gapX + colorbarCanvas.width;
+    const specRowHeight = Math.max(specCanvas.height, colorbarCanvas.height);
+    const totalWidth = Math.max(specRowWidth, canvas.width);
+    const totalHeight = specRowHeight + gapY + canvas.height;
+
+    const out = document.createElement('canvas');
+    out.width = totalWidth;
+    out.height = totalHeight;
+    const outCtx = out.getContext('2d');
+    outCtx.fillStyle = cssVar('--bg') || '#0f1115';
+    outCtx.fillRect(0, 0, totalWidth, totalHeight);
+    outCtx.drawImage(specCanvas, 0, 0);
+    outCtx.drawImage(colorbarCanvas, specCanvas.width + gapX, 0);
+    outCtx.drawImage(canvas, 0, specRowHeight + gapY);
+
+    out.toBlob((blob) => {
+      if (!blob) return;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const ts = new Date().toISOString().replace(/[:.]/g, '-');
+      a.href = url;
+      a.download = `spectrogram-${ts}.png`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }, 'image/png');
+  }
+
+  // ---- Load file ----
+  async function loadFile(file) {
+    if (!file) return;
+    stopPlayback();
+    if (!audioCtx || audioCtx.state === 'closed') {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    const arrayBuffer = await file.arrayBuffer();
+    let decoded;
+    try {
+      decoded = await audioCtx.decodeAudioData(arrayBuffer);
+    } catch (err) {
+      alert('この音声ファイルを読み込めませんでした: ' + err.message);
+      return;
+    }
+    sampleRate = decoded.sampleRate;
+    recordedFloat32 = decoded.getChannelData(0).slice();
+    if (recomputeTimer) { clearTimeout(recomputeTimer); recomputeTimer = null; }
+    specOffscreen = null;
+    specMeta = null;
+    overviewOffscreen = null;
+    overviewMeta = null;
+    totalDuration = recordedFloat32.length / sampleRate;
+    viewStart = 0;
+    viewEnd = totalDuration;
+    freqMin = 0;
+    freqMax = sampleRate / 2;
+    resetZoomBtn.disabled = true;
+    specRangeLabel.textContent = '';
+
+    resizeCanvas();
+    fileLabel.textContent = file.name;
+    updateTimeLabel(recordedFloat32.length / sampleRate);
+    playBtn.disabled = false;
+    saveBtn.disabled = false;
+    saveImageBtn.disabled = false;
+    clearBtn.disabled = false;
+
+    setStatus('ファイル読み込み完了・スペクトログラム解析中…', false);
+    scheduleSpectrogramCompute(recordedFloat32, sampleRate, 'ファイル読み込み完了');
+  }
+
+  // ---- Wire up buttons ----
+  recordBtn.addEventListener('click', startRecording);
+  stopBtn.addEventListener('click', stopRecording);
+  clearBtn.addEventListener('click', clearAll);
+  saveBtn.addEventListener('click', saveWav);
+  saveImageBtn.addEventListener('click', saveCombinedImage);
+  loadBtn.addEventListener('click', () => fileInput.click());
+  fileInput.addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    loadFile(file);
+    fileInput.value = '';
+  });
+
+  resizeCanvas();
+  resizeSpecCanvas();
+  drawColorbar();
+})();
+</script>
+</body>
+</html>
