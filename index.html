@@ -3,19 +3,21 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Recorder - ブラウザ録音ツール</title>
+<title>SpectroView</title>
 <style>
   :root {
-    --bg: #121317;
-    --panel: #191b20;
-    --panel-border: #2c3038;
-    --text: #dfe2e8;
-    --text-dim: #7d8390;
-    --accent: #2be6d0;
-    --track-wave: #ffb454;
-    --danger: #ff5252;
-    --wave: #ffb454;
-    --wave-live: #6be3a0;
+    --bg: #17181b;
+    --panel: #212226;
+    --panel-border: #35363c;
+    --text: #dadce0;
+    --text-dim: #83858c;
+    --accent: #2f9bff;
+    --track-wave: #39d2ff;
+    --danger: #e5484d;
+    --wave: #4fb2ff;
+    --wave-fill-a: #7fd4ff;
+    --wave-fill-b: #1f6fb0;
+    --wave-live: #34e7c0;
     --radius: 10px;
     --mono: ui-monospace, "SF Mono", "Cascadia Mono", Consolas, "Roboto Mono", monospace;
   }
@@ -81,7 +83,8 @@
     width: 100%;
     height: 180px;
     display: block;
-    background: color-mix(in srgb, var(--panel) 92%, black 8%);
+    background: #0a0b0d;
+    border: 1px solid var(--panel-border);
     border-radius: 8px;
   }
   /* Reserves the same width as canvas#colorbar so the waveform's plotting area
@@ -97,6 +100,7 @@
     height: 220px;
     display: block;
     background: #000;
+    border: 1px solid var(--panel-border);
     border-radius: 8px;
     cursor: crosshair;
     touch-action: none;
@@ -289,8 +293,7 @@
 <body>
 <main>
   <header>
-    <h1>Recorder</h1>
-    <p>ブラウザだけで録音・再生・波形表示ができるシンプルなツール</p>
+    <h1>SpectroView</h1>
   </header>
 
   <div class="panel track-spec">
@@ -830,7 +833,13 @@
     const dpr = devicePixelScale();
     const minBarHeight = dpr * 1.5;
 
-    ctx.strokeStyle = cssVar('--wave') || '#4f9dff';
+    // Filled gradient body (brighter mid, darker edges) reads as an audio clip the
+    // way a DAW timeline renders it, rather than a flat scope-style trace.
+    const fillGrad = ctx.createLinearGradient(0, 0, 0, height);
+    fillGrad.addColorStop(0, cssVar('--wave-fill-b') || '#1f6fb0');
+    fillGrad.addColorStop(0.5, cssVar('--wave-fill-a') || '#7fd4ff');
+    fillGrad.addColorStop(1, cssVar('--wave-fill-b') || '#1f6fb0');
+    ctx.strokeStyle = fillGrad;
     ctx.lineWidth = Math.max(1, dpr * 0.6);
     ctx.beginPath();
     for (let x = 0; x < width; x++) {
